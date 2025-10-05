@@ -124,18 +124,19 @@ class SunSpecDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Update data via library."""
         _LOGGER.debug("SunSpec Update data coordinator update")
-        data = {}
         try:
             model_ids = self.option_model_filter & set(
                 await self.api.async_get_models()
             )
             _LOGGER.debug("SunSpec Update data got models %s", model_ids)
 
+            data = {}
             for model_id in model_ids:
                 data[model_id] = await self.api.async_get_data(model_id)
             self.api.close()
             return data
         except Exception as exception:
-            _LOGGER.warning("Update error: {exception}")
-            self.api.reconnect_next()
+            if not self.api.is_reconnect():
+                _LOGGER.warning("Update error: %s", exception)
+                self.api.reconnect_next()
             raise UpdateFailed() from exception

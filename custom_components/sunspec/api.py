@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 from types import SimpleNamespace
+from typing import Dict
 
 from homeassistant.core import HomeAssistant
 import sunspec2.modbus.client as modbus_client
@@ -95,7 +96,7 @@ def progress(msg):
 
 
 class SunSpecApiClient:
-    CLIENT_CACHE = {}
+    CLIENT_CACHE: Dict[str, modbus_client.SunSpecModbusClientDeviceTCP] = {}
 
     def __init__(self, host: str, port: int, unit_id: int, hass: HomeAssistant) -> None:
         """Sunspec modbus client."""
@@ -112,13 +113,11 @@ class SunSpecApiClient:
     def get_client(self, config=None):
         cached = SunSpecApiClient.CLIENT_CACHE.get(self._client_key, None)
         if cached is None or config is not None:
-            _LOGGER.debug("Not using cached connection")
+            if not self._reconnect:
+                _LOGGER.debug("Not using cached connection")
             cached = self.modbus_connect(config)
             SunSpecApiClient.CLIENT_CACHE[self._client_key] = cached
-        if self._reconnect:
-            if self.check_port():
-                cached.connect()
-                self._reconnect = False
+            self._reconnect = False
         return cached
 
     def async_get_client(self, config=None):
@@ -147,8 +146,16 @@ class SunSpecApiClient:
         model_ids = sorted(list(filter(lambda m: type(m) is int, client.models.keys())))
         return model_ids
 
-    def reconnect_next(self):
+    def reconnect_next(self) -> None:
+        """Invalidates the cached client and sets a reconnect flag."""
+        cached = SunSpecApiClient.CLIENT_CACHE.pop(self._client_key, None)
+        if cached is not None:
+            cached.disconnect()
         self._reconnect = True
+
+    def is_reconnect(self) -> bool:
+        """Returns true if the api is in reconnect mode."""
+        return self._reconnect
 
     def close(self):
         client = self.get_client()
