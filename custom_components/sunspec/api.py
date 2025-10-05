@@ -1,7 +1,9 @@
 """Sample API Client."""
 
+import errno
 import logging
 import socket
+import select
 import threading
 import time
 from types import SimpleNamespace
@@ -13,7 +15,7 @@ from sunspec2.modbus.client import SunSpecModbusClientException
 from sunspec2.modbus.client import SunSpecModbusClientTimeout
 from sunspec2.modbus.modbus import ModbusClientError
 
-TIMEOUT = 120
+TIMEOUT = 30
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
@@ -163,25 +165,42 @@ class SunSpecApiClient:
     def check_port(self) -> bool:
         """Check if port is available"""
         with self._lock:
-            sock_timeout = float(3)
+            sock_timeout = float(0.5)
             _LOGGER.debug(
                 f"Check_Port: opening socket on {self._host}:{self._port} with a {sock_timeout}s timeout."
             )
-            socket.setdefaulttimeout(sock_timeout)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_res = sock.connect_ex((self._host, self._port))
-            is_open = sock_res == 0  # True if open, False if not
-            if is_open:
-                sock.shutdown(socket.SHUT_RDWR)
-                _LOGGER.debug(
-                    f"Check_Port (SUCCESS): port open on {self._host}:{self._port}"
+            sock.setblocking(False)
+            try:
+                sock_res = sock.connect_ex((self._host, self._port))
+                if sock_res != 0 and sock_res != errno.EINPROGRESS:
+                    _LOGGER.debug(
+                        f"Check_Port (ERROR): port not available on {self._host}:{self._port} - error: {sock_res}"
+                    )
+                    return False
+
+                # Check state
+                readable, writable, errors = select.select(
+                    [], [sock], [sock], sock_timeout
                 )
-            else:
-                _LOGGER.debug(
-                    f"Check_Port (ERROR): port not available on {self._host}:{self._port} - error: {sock_res}"
-                )
-            sock.close()
-        return is_open
+                if errors:  # error
+                    sock_res = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                    _LOGGER.debug(
+                        f"Check_Port (ERROR): port not available on {self._host}:{self._port} - error: {sock_res}"
+                    )
+                    return False
+                elif writable:  # successfully connected
+                    _LOGGER.debug(
+                        f"Check_Port (SUCCESS): port open on {self._host}:{self._port}"
+                    )
+                    return True
+                else:  # timeout
+                    _LOGGER.debug(
+                        f"Check_Port (ERROR): port not available on {self._host}:{self._port} - timeout"
+                    )
+                    return False
+            finally:
+                sock.close()
 
     def modbus_connect(self, config=None):
         use_config = SimpleNamespace(
