@@ -113,8 +113,7 @@ class SunSpecApiClient:
     def get_client(self, config=None):
         cached = SunSpecApiClient.CLIENT_CACHE.get(self._client_key, None)
         if cached is None or config is not None:
-            if not self._reconnect:
-                _LOGGER.debug("Not using cached connection")
+            _LOGGER.debug("Not using cached connection")
             cached = self.modbus_connect(config)
             SunSpecApiClient.CLIENT_CACHE[self._client_key] = cached
             self._reconnect = False
